@@ -1,0 +1,144 @@
+name: Android CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  test:
+    if: ${{ false }} # KKona
+    name: Run unit tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/cache@v2
+        with:
+          path: ~/.gradle/caches
+          key: gradle-${{ runner.os }}-${{ hashFiles('**.gradle', '**/**.gradle', '**/gradle/wrapper/gradle-wrapper.properties') }}
+      - name: set up JDK 11
+        uses: actions/setup-java@v2
+        with:
+          distribution: 'adopt'
+          java-version: '11'
+      - name: Unit tests
+        run: bash ./gradlew testDebug --stacktrace
+
+  lint:
+    name: Run lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/cache@v2
+        with:
+          path: ~/.gradle/caches
+          key: gradle-${{ runner.os }}-${{ hashFiles('**.gradle', '**/**.gradle', '**/gradle/wrapper/gradle-wrapper.properties') }}
+      - name: set up JDK 11
+        uses: actions/setup-java@v2
+        with:
+          distribution: 'adopt'
+          java-version: '11'
+      - name: Lint
+        run: bash ./gradlew lintVitalRelease
+
+  build:
+    name: Generate apk
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/cache@v2
+        with:
+          path: ~/.gradle/caches
+          key: gradle-${{ runner.os }}-${{ hashFiles('**.gradle', '**/**.gradle', '**/gradle/wrapper/gradle-wrapper.properties') }}
+      - name: set up JDK 11
+        uses: actions/setup-java@v2
+        with:
+          distribution: 'adopt'
+          java-version: '11'
+
+      - name: Build debug apk
+        run: bash ./gradlew :app:assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: debug apk
+          path: ${{ github.workspace }}/app/build/outputs/apk/debug/*.apk
+
+      - name: Update debug tag
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/master')
+        uses: richardsimko/update-tag@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: debug
+
+      - name: Update debug release
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/master')
+        uses: meeDamian/github-release@2.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: debug
+          name: Debug APK
+          files: ${{ github.workspace }}/app/build/outputs/apk/debug/DankChat-debug.apk
+          gzip: false
+          allow_override: true
+
+  build-release:
+    name: Generate signed release apk
+    runs-on: ubuntu-latest
+    environment: release
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/master')
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/cache@v2
+        with:
+          path: ~/.gradle/caches
+          key: gradle-${{ runner.os }}-${{ hashFiles('**.gradle', '**/**.gradle', '**/gradle/wrapper/gradle-wrapper.properties') }}
+      - name: set up JDK 11
+        uses: actions/setup-java@v2
+        with:
+          distribution: 'adopt'
+          java-version: '11'
+
+      - name: Decode Keystore
+        id: decode_keystore
+        uses: timheuer/base64-to-file@v1
+        with:
+          fileName: 'keystore/DankChat.jks'
+          encodedString: ${{ secrets.SIGNING_KEY }}
+
+      - name: Build signed release apk
+        run: bash ./gradlew app:assembleRelease
+        env:
+          SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: Signed release apk
+          path: ${{ github.workspace }}/app/build/outputs/apk/release/*.apk
+
+      - name: Update release tag
+        uses: richardsimko/update-tag@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: release
+
+      - name: Update signed release
+        uses: meeDamian/github-release@2.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: release
+          name: Signed release APK
+          files: ${{ github.workspace }}/app/build/outputs/apk/release/*.apk
+          gzip: false
+          allow_override: true
